@@ -12,8 +12,6 @@ use poem::{
 use std::sync::Arc;
 use server::*;
 
-
-
 #[handler]
 fn ws(ws: WebSocket, game: Data<&Arc<Game>>) -> impl IntoResponse {
 

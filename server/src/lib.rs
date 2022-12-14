@@ -16,7 +16,7 @@ use crossterm::{
 };
 use std::io::{stdout, Write};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Client {
     id: u32,
     position: Arc<RwLock<Position>>,
@@ -43,11 +43,8 @@ impl Client {
     }
 
     pub fn set_position(&mut self, position: Position) {
+        *self.old_position.write() = self.position.read().clone();
         *self.position.write() = position;
-    }
-
-    pub fn set_old_position(&mut self, position: Position) {
-        *self.old_position.write() = position;
     }
 }
 
@@ -109,7 +106,6 @@ impl Game {
 
     pub fn adjust_position(&self, client: &mut Client, direction: Direction) {
         let mut position = client.position.read().clone();
-        client.set_old_position(position.clone());
         match direction {
             Direction::Up => {
                 if position.y == 0 {
@@ -152,14 +148,48 @@ impl Game {
         }
         queue!(stdout, cursor::MoveToNextLine(1)).unwrap();
         stdout.flush().unwrap();
+
+        // for i in 0..self.field.height {
+        //     for j in 0..self.field.width {
+        //         let mut found = false;
+        //         for client in self.clients.read().iter() {
+        //             let position = client.position.read();
+        //             if position.x == j && position.y == i {
+        //                 print!("{} ", client.id);
+        //                 found = true;
+        //                 break;
+        //             }
+        //         }
+        //         if !found {
+        //             print!("X ");
+        //         }
+        //     }
+        //     println!();
+        // }
+        // println!();
     }
 
     fn refresh_field(&self) {
         let mut stdout = stdout();
         let clients = self.clients.read();
 
-        // collect all positions ant put thier clients in a vector
-        let mut map: HashMap<Position, bool> = HashMap::new();
+        for client in clients.iter() {
+            let old_position = client.old_position.read();
+            queue!(
+                stdout,
+                cursor::MoveTo(0, 5),
+                Print(&format!("{:?}", old_position)),
+            ).unwrap();
+            queue!(
+                stdout,
+                cursor::MoveTo(old_position.x * 2, old_position.y),
+                Print("X"),
+            )
+            .unwrap();
+        }
+        stdout.flush().unwrap();
+
+
         for client in clients.iter() {
             let position = client.position.read();
             queue!(
@@ -170,28 +200,42 @@ impl Game {
                 ResetColor
             )
             .unwrap();
-            map.insert(position.clone(), true);
-        }
-        
-        for client in clients.iter() {
-            let old_position = client.old_position.read();
-            if map.get(&old_position).is_none() {
-                queue!(
-                    stdout,
-                    cursor::MoveTo(old_position.x * 2, old_position.y),
-                    Print("X")
-                )
-                .unwrap();
-            }
         }
         stdout.flush().unwrap();
+
+        // collect all positions ant put thier clients in a vector
+        // let mut set: std::collections::HashSet<Position> = std::collections::HashSet::new();
+        // for client in clients.iter() {
+        //     let position = client.position.read();
+        //     execute!(
+        //         stdout,
+        //         cursor::MoveTo(position.x * 2, position.y),
+        //         SetForegroundColor(client.color),
+        //         Print(client.id.to_string()),
+        //         ResetColor
+        //     )
+        //     .unwrap();
+        //     set.insert(position.clone());
+        // }
+
+        // for client in clients.iter() {
+        //     let old_position = client.old_position.read();
+        //     if !set.contains(&old_position) {
+        //         execute!(
+        //             stdout,
+        //             cursor::MoveTo(old_position.x * 2, old_position.y),
+        //             Print("X")
+        //         )
+        //         .unwrap();
+        //     }
+        // }
+
     }
 
     pub async fn run(&self) {
         self.display_field_once();
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            self.refresh_field();
+            tokio::time::sleep(Duration::from_secs(2)).await;
             let clients_vec: Vec<Client>;
             {
                 let mut map: HashMap<Position, Vec<&mut Client>> = HashMap::new();
@@ -205,24 +249,29 @@ impl Game {
                 }
 
                 for (_, clients) in map.iter_mut() {
-                    if clients.len() > 1 {
-                        for client in clients.iter_mut() {
-                            client.adjust_score(-5);
-                            //move the client to a random position
-                            let old_position = client.position.read().clone();
-                            client.set_old_position(old_position);
-                            let new_position = self.create_random_position();
-                            client.set_position(new_position);
-                        }
-                        continue;
-                    }
+                    // if clients.len() > 1 {
+                    //     for client in clients.iter_mut() {
+                    //         client.adjust_score(-5);
+                    //         //move the client to a random position
+                    //         let new_position = self.create_random_position();
+                    //         client.set_position(new_position);
+                    //     }
+    
+                    // }
+                    // else{
+                    //     for client in clients.iter_mut() {
+                    //         client.adjust_score(1);
+                    //     }
+                    // }
                     for client in clients.iter_mut() {
-                        client.adjust_score(1);
+                        let new_position = self.create_random_position();
+                        client.set_position(new_position);
                     }
                 }
-
                 clients_vec = clients.clone();
             }
+
+            self.refresh_field();
 
             for client in clients_vec.iter() {
                 //send a position update to the client
@@ -233,6 +282,7 @@ impl Game {
                     }
                 }
             }
+            
         }
     }
 }
