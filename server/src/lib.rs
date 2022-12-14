@@ -6,6 +6,17 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 
+#[macro_use]
+extern crate crossterm;
+use crossterm::{
+    cursor,
+    style::Color,
+    event::{read, Event, KeyCode, KeyEvent, KeyModifiers},
+    style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor},
+    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
+};
+use std::io::{stdout, Write};
+
 #[derive(Clone)]
 pub struct Client {
     id: u32,
@@ -35,12 +46,19 @@ impl Client {
 
 pub struct Game {
     clients: RwLock<Vec<Client>>,
-    max_clients: u32,
+    max_clients: u16,
     field: Field,
 }
 
+
+impl Drop for Game {
+    fn drop(&mut self) {
+    }
+}
+
+
 impl Game {
-    pub fn new(width: u32, height: u32, max_clients: u32) -> Self {
+    pub fn new(width: u16, height: u16, max_clients: u16) -> Self {
         Self {
             clients: RwLock::new(Vec::new()),
             max_clients,
@@ -64,8 +82,8 @@ impl Game {
 
     pub fn create_random_position(&self) -> Position {
         let mut rng = rand::thread_rng();
-        let x = rng.gen_range(0..self.field.width);
-        let y = rng.gen_range(0..self.field.height);
+        let x = rng.gen_range(0..self.field.width) as u16;
+        let y = rng.gen_range(0..self.field.height) as u16;
         Position { x, y }
     }
 
@@ -93,8 +111,8 @@ impl Game {
             }
             Direction::Down => {
                 position.y += 1;
-                if position.y >= self.field.height {
-                    position.y = self.field.height - 1;
+                if position.y >= self.field.height - 1{
+                    position.y = 0;
                 }
             }
             Direction::Left => {
@@ -106,8 +124,8 @@ impl Game {
             }
             Direction::Right => {
                 position.x += 1;
-                if position.x >= self.field.width {
-                    position.x = self.field.width - 1;
+                if position.x >= self.field.width - 1{
+                    position.x = 0;
                 }
             }
         }
@@ -115,24 +133,43 @@ impl Game {
     }
 
     fn display_field_once(&self) {
+        let mut stdout = stdout();
+        queue!(stdout, Clear(ClearType::All), cursor::MoveTo(0,0)).unwrap();
         for _ in 0..self.field.height {
             for _ in 0..self.field.width {
-                print!("X ");
+                queue!(stdout, Print("X ")).unwrap();
             }
-            println!();
+            queue!(stdout, cursor::MoveToNextLine(1)).unwrap();
         }
-        println!();
+        queue!(stdout, cursor::MoveToNextLine(1)).unwrap();
+        stdout.flush().unwrap();
     }
 
     fn refresh_field(&self) {
-        
+        let mut stdout = stdout();
+        let clients = self.clients.read();
+        for client in clients.iter() {
+            let position = client.position.read();
+            queue!(
+                stdout,
+                cursor::MoveTo(position.x * 2 , position.y),
+                SetForegroundColor(Color::Red),
+                Print("X"),
+                ResetColor
+            )
+            .unwrap();
+            // restore old position if there is no client
+            
+        }
+        stdout.flush().unwrap();
     }
 
     pub async fn run(&self) {
+
         self.display_field_once();
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            
+            self.refresh_field();
             let mut clients;
             {
                 let mut map: HashMap<Position, Vec<&mut Client>> = HashMap::new();
@@ -146,7 +183,7 @@ impl Game {
                 }
 
                 for (_, clients) in map.iter_mut() {
-                    if clients.len() < 1 {
+                    if clients.len() < 2 {
                         for client in clients.iter_mut() {
                             client.adjust_score(1);
                         }

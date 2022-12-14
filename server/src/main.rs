@@ -59,7 +59,7 @@ async fn main() -> Result<(), std::io::Error> {
     // }
     tracing_subscriber::fmt::init();
 
-    let game = Arc::new(Game::new(10,10,10));
+    let game = Arc::new(Game::new(3,3,10));
 
     // run game
     let game_c = game.clone();

@@ -1,18 +1,18 @@
 use serde::{Deserialize, Serialize};
 use rand::Rng;
 pub struct Field {
-    pub width: u32,
-    pub height: u32,
+    pub width: u16,
+    pub height: u16,
 }
 
 #[derive(Clone, Eq, Hash, PartialEq, Deserialize, Serialize, Debug)]
 pub struct Position {
-    pub x: u32,
-    pub y: u32,
+    pub x: u16,
+    pub y: u16,
 }
 
 impl Position {
-    pub fn new(x: u32, y: u32) -> Self {
+    pub fn new(x: u16, y: u16) -> Self {
         Self { x, y }
     }
 
