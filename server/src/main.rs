@@ -54,9 +54,9 @@ fn ws(ws: WebSocket, game: Data<&Arc<Game>>) -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
-    if std::env::var_os("RUST_LOG").is_none() {
-        std::env::set_var("RUST_LOG", "poem=debug");
-    }
+    // if std::env::var_os("RUST_LOG").is_none() {
+    //     std::env::set_var("RUST_LOG", "poem=debug");
+    // }
     tracing_subscriber::fmt::init();
 
     let game = Arc::new(Game::new(10,10,10));

@@ -85,54 +85,54 @@ impl Game {
         let mut position = client.position.read().clone();
         match direction {
             Direction::Up => {
-                if position.y > 0 {
+                if position.y == 0 {
+                    position.y = self.field.height - 1;
+                } else {
                     position.y -= 1;
                 }
             }
             Direction::Down => {
-                if position.y < self.field.height + 1 {
-                    position.y += 1;
+                position.y += 1;
+                if position.y >= self.field.height {
+                    position.y = self.field.height - 1;
                 }
             }
             Direction::Left => {
-                if position.x > 0 {
+                if position.x == 0 {
+                    position.x = self.field.width - 1;
+                } else {
                     position.x -= 1;
                 }
             }
             Direction::Right => {
-                if position.x < self.field.width + 1 {
-                    position.x += 1;
+                position.x += 1;
+                if position.x >= self.field.width {
+                    position.x = self.field.width - 1;
                 }
             }
         }
         client.set_position(position);
     }
 
-    pub fn display_field_once(&self) {
-        for i in 0..self.field.height {
-            for j in 0..self.field.width {
-                let mut found = false;
-                for client in self.clients.read().iter() {
-                    let position = client.position.read();
-                    if position.x == j && position.y == i {
-                        print!("{}", client.id);
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    print!("X");
-                }
+    fn display_field_once(&self) {
+        for _ in 0..self.field.height {
+            for _ in 0..self.field.width {
+                print!("X ");
             }
             println!();
         }
         println!();
     }
 
+    fn refresh_field(&self) {
+        
+    }
+
     pub async fn run(&self) {
+        self.display_field_once();
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            self.display_field_once();
+            
             let mut clients;
             {
                 let mut map: HashMap<Position, Vec<&mut Client>> = HashMap::new();
@@ -154,9 +154,13 @@ impl Game {
                     }
                     for client in clients.iter_mut() {
                         client.adjust_score(-5);
+                        //move the client to a random position
+                        let position = self.create_random_position();
+                        client.set_position(position);
                     }
                 }
             }
+
             for client in clients.iter() {
                 //send a position update to the client
                 let msg = Message::new_position(client.position.read().clone());
