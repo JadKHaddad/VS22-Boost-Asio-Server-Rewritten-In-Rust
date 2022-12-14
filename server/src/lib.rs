@@ -10,10 +10,9 @@ use tokio::sync::mpsc::Sender;
 extern crate crossterm;
 use crossterm::{
     cursor,
-    event::{read, Event, KeyCode, KeyEvent, KeyModifiers},
     style::Color,
-    style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor},
-    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
+    style::{Print, ResetColor, SetForegroundColor},
+    terminal::{Clear, ClearType},
 };
 use std::io::{stdout, Write};
 
@@ -22,23 +21,25 @@ pub struct Client {
     id: u32,
     position: Arc<RwLock<Position>>,
     old_position: Arc<RwLock<Position>>,
-    score: i32,
+    score: Arc<RwLock<i32>>,
     sender: Option<Sender<String>>,
+    color: Color,
 }
 
 impl Client {
-    pub fn new(id: u32, position: Position, sender: Option<Sender<String>>) -> Self {
+    pub fn new(id: u32, position: Position, sender: Option<Sender<String>>, color: Color) -> Self {
         Self {
             id,
             position: Arc::new(RwLock::new(position.clone())),
             old_position: Arc::new(RwLock::new(position)),
-            score: 0,
+            score: Arc::new(RwLock::new(0)),
             sender,
+            color,
         }
     }
 
     pub fn adjust_score(&mut self, score: i32) {
-        self.score += score;
+        *self.score.write() += score;
     }
 
     pub fn set_position(&mut self, position: Position) {
@@ -86,6 +87,12 @@ impl Game {
         let x = rng.gen_range(0..self.field.width) as u16;
         let y = rng.gen_range(0..self.field.height) as u16;
         Position { x, y }
+    }
+
+    pub fn create_random_color(&self) -> Color {
+        let mut rng = rand::thread_rng();
+        let color = rng.gen_range(0..255) as u8;
+        Color::AnsiValue(color)
     }
 
     pub fn on_new_message(&self, client: &mut Client, msg: String) {
@@ -151,33 +158,28 @@ impl Game {
         let mut stdout = stdout();
         let clients = self.clients.read();
 
-        // collect all positions
-        let mut map: HashMap<Position, Vec<&Client>> = HashMap::new();
+        // collect all positions ant put thier clients in a vector
+        let mut map: HashMap<Position, bool> = HashMap::new();
         for client in clients.iter() {
             let position = client.position.read();
-            let entry = map.entry(position.clone()).or_insert(Vec::new());
-            entry.push(client);
-        }
-
-        // print all clients
-        for client in clients.iter() {
-            let position = client.position.read();
-            let old_position = client.old_position.read();
             queue!(
                 stdout,
                 cursor::MoveTo(position.x * 2, position.y),
-                SetForegroundColor(Color::Red),
+                SetForegroundColor(client.color),
                 Print(client.id.to_string()),
                 ResetColor
             )
             .unwrap();
-
-            // restore old position if there is no client
+            map.insert(position.clone(), true);
+        }
+        
+        for client in clients.iter() {
+            let old_position = client.old_position.read();
             if map.get(&old_position).is_none() {
                 queue!(
                     stdout,
                     cursor::MoveTo(old_position.x * 2, old_position.y),
-                    Print("C")
+                    Print("X")
                 )
                 .unwrap();
             }
@@ -190,11 +192,11 @@ impl Game {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
             self.refresh_field();
-            let mut clients;
+            let clients_vec: Vec<Client>;
             {
                 let mut map: HashMap<Position, Vec<&mut Client>> = HashMap::new();
 
-                clients = self.clients.write().clone();
+                let mut clients = self.clients.write();
 
                 for client in clients.iter_mut() {
                     let position = client.position.clone();
@@ -203,24 +205,26 @@ impl Game {
                 }
 
                 for (_, clients) in map.iter_mut() {
-                    if clients.len() < 2 {
+                    if clients.len() > 1 {
                         for client in clients.iter_mut() {
-                            client.adjust_score(1);
+                            client.adjust_score(-5);
+                            //move the client to a random position
+                            let old_position = client.position.read().clone();
+                            client.set_old_position(old_position);
+                            let new_position = self.create_random_position();
+                            client.set_position(new_position);
                         }
                         continue;
                     }
                     for client in clients.iter_mut() {
-                        client.adjust_score(-5);
-                        //move the client to a random position
-                        let old_position = client.position.read().clone();
-                        let new_position = self.create_random_position();
-                        client.set_old_position(old_position);
-                        client.set_position(new_position);
+                        client.adjust_score(1);
                     }
                 }
+
+                clients_vec = clients.clone();
             }
 
-            for client in clients.iter() {
+            for client in clients_vec.iter() {
                 //send a position update to the client
                 let msg = Message::new_position(client.position.read().clone());
                 if let Ok(msg) = msg.to_json() {

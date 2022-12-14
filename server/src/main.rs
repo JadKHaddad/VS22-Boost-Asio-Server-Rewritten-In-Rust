@@ -20,7 +20,8 @@ fn ws(ws: WebSocket, game: Data<&Arc<Game>>) -> impl IntoResponse {
     let id = game.get_total_clients();
     let position = game.create_random_position();
     let (tx, mut rx) = channel::<String>(100);
-    let client = Client::new(id, position, Some(tx));
+    let color = game.create_random_color();
+    let client = Client::new(id, position, Some(tx), color);
 
     let client_sender = client.clone();
     let mut client_receiver = client.clone();
@@ -59,7 +60,7 @@ async fn main() -> Result<(), std::io::Error> {
     // }
     tracing_subscriber::fmt::init();
 
-    let game = Arc::new(Game::new(3,3,10));
+    let game = Arc::new(Game::new(3,3,5));
 
     // run game
     let game_c = game.clone();
