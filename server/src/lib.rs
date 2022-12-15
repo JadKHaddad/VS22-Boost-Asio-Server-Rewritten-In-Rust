@@ -67,6 +67,7 @@ pub struct Game {
     running: RwLock<bool>,
     max_clients: u16,
     field: Field,
+    last_id: RwLock<u16>,
 }
 
 impl Game {
@@ -76,15 +77,64 @@ impl Game {
             running: RwLock::new(false),
             max_clients,
             field: Field { width, height },
+            last_id: RwLock::new(0),
         }
     }
 
     pub fn add_client(&self, client: Client) {
+        self.place_client(&client);
         self.clients.write().push(client);
     }
 
-    pub fn remove_client(&self, id: u16) {
-        self.clients.write().retain(|c| c.id != id);
+    pub fn remove_client(&self, client: &Client) {
+        let mut clients = self.clients.write();
+
+        let state = client.state.read();
+        let position = state.position.clone();
+        let old_position = state.old_position.clone();
+
+        clients.retain(|c| c.id != client.id);
+
+        let mut positions = HashSet::new();
+        for client in clients.iter() {
+            positions.insert(client.state.read().position.clone());
+        }
+
+        let mut stdout = stdout();
+        if !positions.contains(&position) {
+            queue!(
+                stdout,
+                cursor::MoveTo(position.x * 2, position.y),
+                Print("X"),
+            )
+            .unwrap();
+        }
+        if !positions.contains(&old_position) {
+            queue!(
+                stdout,
+                cursor::MoveTo(old_position.x * 2, old_position.y),
+                Print("X"),
+            )
+            .unwrap();
+        }
+        stdout.flush().unwrap();
+    }
+
+    pub fn create_id(&self) -> u16 {
+        let mut id = self.last_id.write();
+        *id += 1;
+        if *id > 9 {
+            let mut stdout = stdout();
+            execute!(
+                stdout,
+                Clear(ClearType::All),
+                cursor::MoveTo(0, 0),
+                Print("Client id too big!\n")
+            )
+            .unwrap();
+            std::process::exit(1);
+        }
+        *id
     }
 
     pub fn get_total_clients(&self) -> u16 {
@@ -93,6 +143,23 @@ impl Game {
 
     pub fn get_max_clients(&self) -> u16 {
         self.max_clients
+    }
+
+    pub fn start_game(&self) -> bool {
+        self.get_total_clients() >= self.get_max_clients()
+    }
+
+    fn place_client(&self, client: &Client) {
+        let mut stdout = stdout();
+        let state = client.state.read();
+        execute!(
+            stdout,
+            cursor::MoveTo(state.position.x * 2, state.position.y),
+            SetForegroundColor(state.color),
+            Print(state.id.to_string()),
+            ResetColor
+        )
+        .unwrap();
     }
 
     pub fn create_random_position(&self) -> Position {
@@ -122,7 +189,6 @@ impl Game {
 
     pub fn adjust_position(&self, client: &mut Client, direction: Direction) {
         let mut state = client.state.write();
-        state.old_position = state.position.clone();
         let mut position = &mut state.position;
         match direction {
             Direction::Up => {
@@ -154,7 +220,7 @@ impl Game {
         }
     }
 
-    fn display_field_once(&self) {
+    pub fn display_field_once(&self) {
         let mut stdout = stdout();
         queue!(stdout, Clear(ClearType::All), cursor::MoveTo(0, 0)).unwrap();
         for _ in 0..self.field.height {
@@ -196,28 +262,6 @@ impl Game {
             }
         }
 
-        // let mut positions: HashMap<(u16, u16), (u16, Color)> = HashMap::new();
-        // for client in clients.iter() {
-        //     let position = client.position.read();
-        //     positions.insert((position.x, position.y), (client.id, client.color));
-        // }
-        // for i in 0..self.field.height {
-        //     for j in 0..self.field.width {
-        //         queue!(stdout, cursor::MoveTo(i * 2, j)).unwrap();
-        //         if let Some((id, color)) = positions.get(&(i, j)) {
-        //             queue!(
-        //                 stdout,
-        //                 SetForegroundColor(*color),
-        //                 Print(id.to_string()),
-        //                 ResetColor
-        //             )
-        //             .unwrap();
-        //             continue;
-        //         }
-        //         queue!(stdout, Print("X"),).unwrap();
-        //     }
-        // }
-
         stdout.flush().unwrap();
     }
 
@@ -226,7 +270,6 @@ impl Game {
             return;
         }
         *self.running.write() = true;
-        self.display_field_once();
         loop {
             tokio::time::sleep(Duration::from_millis(700)).await;
             {
@@ -234,6 +277,8 @@ impl Game {
 
                 let mut states_gaurds: Vec<RwLockWriteGuard<RawRwLock, ClientState>> =
                     clients.iter().map(|client| client.state.write()).collect();
+
+                self.refresh_field(&states_gaurds);
 
                 let mut map: HashMap<Position, Vec<&mut RwLockWriteGuard<RawRwLock, ClientState>>> =
                     HashMap::new();
@@ -245,6 +290,9 @@ impl Game {
                 }
 
                 for (_, states) in map.iter_mut() {
+                    for state in states.iter_mut() {
+                        state.old_position = state.position.clone();
+                    }
                     if states.len() > 1 {
                         for state in states.iter_mut() {
                             state.score -= 5;
@@ -257,7 +305,6 @@ impl Game {
                         state.score += 1;
                     }
                 }
-                self.refresh_field(&states_gaurds);
             }
 
             for client in self.clients.read().iter() {
