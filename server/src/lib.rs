@@ -1,7 +1,9 @@
-use parking_lot::RwLock;
+use parking_lot::lock_api::RwLockWriteGuard;
+use parking_lot::{RawRwLock, RwLock};
 use rand::Rng;
 use shared::*;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
@@ -17,31 +19,46 @@ use crossterm::{
 use std::io::{stdout, Write};
 
 #[derive(Clone, Debug)]
+struct ClientState {
+    id: u16,
+    position: Position,
+    old_position: Position,
+    score: i32,
+    color: Color,
+}
+
+#[derive(Clone, Debug)]
 pub struct Client {
     id: u16,
-    position: Arc<RwLock<Position>>,
-    score: Arc<RwLock<i32>>,
+    state: Arc<RwLock<ClientState>>,
     sender: Sender<String>,
-    color: Color,
 }
 
 impl Client {
     pub fn new(id: u16, position: Position, sender: Sender<String>, color: Color) -> Self {
         Self {
             id,
-            position: Arc::new(RwLock::new(position.clone())),
-            score: Arc::new(RwLock::new(0)),
+            state: Arc::new(RwLock::new(ClientState {
+                id,
+                position: position.clone(),
+                old_position: position,
+                score: 0,
+                color,
+            })),
             sender,
-            color,
         }
     }
 
     pub fn adjust_score(&mut self, score: i32) {
-        *self.score.write() += score;
+        self.state.write().score += score;
     }
 
     pub fn set_position(&mut self, position: Position) {
-        *self.position.write() = position;
+        self.state.write().position = position;
+    }
+
+    pub fn set_old_position(&mut self, position: Position) {
+        self.state.write().old_position = position;
     }
 }
 
@@ -104,7 +121,9 @@ impl Game {
     }
 
     pub fn adjust_position(&self, client: &mut Client, direction: Direction) {
-        let mut position = client.position.read().clone();
+        let mut state = client.state.write();
+        state.old_position = state.position.clone();
+        let mut position = &mut state.position;
         match direction {
             Direction::Up => {
                 if position.y == 0 {
@@ -133,7 +152,6 @@ impl Game {
                 }
             }
         }
-        client.set_position(position);
     }
 
     fn display_field_once(&self) {
@@ -149,30 +167,57 @@ impl Game {
         stdout.flush().unwrap();
     }
 
-    fn refresh_field(&self) {
+    fn refresh_field(&self, states_gaurds: &Vec<RwLockWriteGuard<RawRwLock, ClientState>>) {
         let mut stdout = stdout();
-        let clients = self.clients.read();
-        let mut positions: HashMap<(u16, u16), (u16, Color)> = HashMap::new();
-        for client in clients.iter() {
-            let position = client.position.read();
-            positions.insert((position.x, position.y), (client.id, client.color));
+
+        let mut positions = HashSet::new();
+        for state in states_gaurds.iter() {
+            let position = state.position.clone();
+            queue!(
+                stdout,
+                cursor::MoveTo(position.x * 2, position.y),
+                SetForegroundColor(state.color),
+                Print(state.id.to_string()),
+                ResetColor
+            )
+            .unwrap();
+            positions.insert(position);
         }
-        for i in 0..self.field.height {
-            for j in 0..self.field.width {
-                queue!(stdout, cursor::MoveTo(i * 2, j)).unwrap();
-                if let Some((id, color)) = positions.get(&(i, j)) {
-                    queue!(
-                        stdout,
-                        SetForegroundColor(*color),
-                        Print(id.to_string()),
-                        ResetColor
-                    )
-                    .unwrap();
-                    continue;
-                }
-                queue!(stdout, Print("X"),).unwrap();
+
+        for state in states_gaurds.iter() {
+            let old_position = &state.old_position;
+            if !positions.contains(old_position) {
+                queue!(
+                    stdout,
+                    cursor::MoveTo(old_position.x * 2, old_position.y),
+                    Print("X")
+                )
+                .unwrap();
             }
         }
+
+        // let mut positions: HashMap<(u16, u16), (u16, Color)> = HashMap::new();
+        // for client in clients.iter() {
+        //     let position = client.position.read();
+        //     positions.insert((position.x, position.y), (client.id, client.color));
+        // }
+        // for i in 0..self.field.height {
+        //     for j in 0..self.field.width {
+        //         queue!(stdout, cursor::MoveTo(i * 2, j)).unwrap();
+        //         if let Some((id, color)) = positions.get(&(i, j)) {
+        //             queue!(
+        //                 stdout,
+        //                 SetForegroundColor(*color),
+        //                 Print(id.to_string()),
+        //                 ResetColor
+        //             )
+        //             .unwrap();
+        //             continue;
+        //         }
+        //         queue!(stdout, Print("X"),).unwrap();
+        //     }
+        // }
+
         stdout.flush().unwrap();
     }
 
@@ -181,41 +226,45 @@ impl Game {
             return;
         }
         *self.running.write() = true;
-
         self.display_field_once();
         loop {
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_millis(700)).await;
             {
-                let mut map: HashMap<Position, Vec<&mut Client>> = HashMap::new();
+                let clients = self.clients.write();
 
-                let mut clients = self.clients.write();
+                let mut states_gaurds: Vec<RwLockWriteGuard<RawRwLock, ClientState>> =
+                    clients.iter().map(|client| client.state.write()).collect();
 
-                for client in clients.iter_mut() {
-                    let position = client.position.clone();
-                    let entry = map.entry(position.read().clone()).or_insert(Vec::new());
-                    entry.push(client);
+                let mut map: HashMap<Position, Vec<&mut RwLockWriteGuard<RawRwLock, ClientState>>> =
+                    HashMap::new();
+
+                for state in states_gaurds.iter_mut() {
+                    let position = state.position.clone();
+                    let entry = map.entry(position).or_insert(Vec::new());
+                    entry.push(state);
                 }
 
-                for (_, clients) in map.iter_mut() {
-                    if clients.len() > 1 {
-                        for client in clients.iter_mut() {
-                            client.adjust_score(-5);
+                for (_, states) in map.iter_mut() {
+                    if states.len() > 1 {
+                        for state in states.iter_mut() {
+                            state.score -= 5;
                             let new_position = self.create_random_position();
-                            client.set_position(new_position);
+                            state.position = new_position;
                         }
                         continue;
                     }
-                    for client in clients.iter_mut() {
-                        client.adjust_score(1);
+                    for state in states.iter_mut() {
+                        state.score += 1;
                     }
                 }
+                self.refresh_field(&states_gaurds);
             }
-            self.refresh_field();
+
             for client in self.clients.read().iter() {
-                let pos_msg = Message::new_position(client.position.read().clone())
+                let pos_msg = Message::new_position(client.state.read().position.clone())
                     .to_json()
                     .unwrap();
-                let score_msg = Message::new_score(client.score.read().clone())
+                let score_msg = Message::new_score(client.state.read().score.clone())
                     .to_json()
                     .unwrap();
                 let sender = client.sender.clone();

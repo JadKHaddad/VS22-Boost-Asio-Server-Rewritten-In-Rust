@@ -25,7 +25,7 @@ impl Position {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub enum Direction {
     Up,
     Down,

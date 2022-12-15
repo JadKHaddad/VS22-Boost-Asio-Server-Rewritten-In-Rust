@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 shared = { path = "../shared" }
 websocket = "0.26.5"
+ctrlc = "3.2.4"
