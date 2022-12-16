@@ -62,7 +62,7 @@ fn ws(ws: WebSocket, game: Data<&Arc<Game>>) -> impl IntoResponse {
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt::init();
 
-    let game = Arc::new(Game::new(5, 5, 5));
+    let game = Arc::new(Game::new(5, 5, 1));
     game.display_field_once();
     let app = Route::new().at("/", get(ws.data(game)));
 
