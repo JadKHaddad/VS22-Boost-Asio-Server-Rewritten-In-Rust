@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 
 #[macro_use]
 extern crate crossterm;
@@ -31,11 +31,11 @@ struct ClientState {
 pub struct Client {
     id: u16,
     state: Arc<RwLock<ClientState>>,
-    sender: Sender<String>,
+    sender: UnboundedSender<String>,
 }
 
 impl Client {
-    pub fn new(id: u16, position: Position, sender: Sender<String>, color: Color) -> Self {
+    pub fn new(id: u16, position: Position, sender: UnboundedSender<String>, color: Color) -> Self {
         Self {
             id,
             state: Arc::new(RwLock::new(ClientState {
@@ -315,10 +315,8 @@ impl Game {
                     .to_json()
                     .unwrap();
                 let sender = client.sender.clone();
-                tokio::spawn(async move {
-                    let _ = sender.send(pos_msg).await;
-                    let _ = sender.send(score_msg).await;
-                });
+                let _ = sender.send(pos_msg);
+                let _ = sender.send(score_msg);
             }
         }
     }

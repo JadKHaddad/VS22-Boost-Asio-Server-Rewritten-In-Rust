@@ -10,13 +10,13 @@ use poem::{
 };
 use server::*;
 use std::sync::Arc;
-use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc::unbounded_channel;
 
 #[handler]
 fn ws(ws: WebSocket, game: Data<&Arc<Game>>) -> impl IntoResponse {
     let id = game.create_id();
     let position = game.create_random_position();
-    let (tx, mut rx) = channel::<String>(100);
+    let (tx, mut rx) = unbounded_channel::<String>();
     let color = game.create_random_color();
     let client = Client::new(id, position, tx, color);
 
@@ -62,7 +62,7 @@ fn ws(ws: WebSocket, game: Data<&Arc<Game>>) -> impl IntoResponse {
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::fmt::init();
 
-    let game = Arc::new(Game::new(5, 5, 1));
+    let game = Arc::new(Game::new(3, 3, 3));
     game.display_field_once();
     let app = Route::new().at("/", get(ws.data(game)));
 
