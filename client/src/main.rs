@@ -1,6 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use shared::{Direction, Message as SharedMessage};
-use tokio::sync::mpsc::unbounded_channel;
+use std::process::exit;
+use tokio::{signal, sync::mpsc::unbounded_channel};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 #[tokio::main]
@@ -18,26 +19,40 @@ async fn main() {
         }
     });
 
+    let tx_signal = tx.clone();
+    let signal = tokio::spawn(async move {
+        let mut sig_count = 0;
+        loop {
+            signal::ctrl_c().await.unwrap();
+            sig_count += 1;
+            if sig_count > 1 {
+                exit(1);
+            }
+            // create disconnect message
+            let msg = SharedMessage::new_disconnect().to_json().unwrap();
+            let _ = tx_signal.send(Message::Text(msg));
+            println!("Waiting for server to respond. Press ctr+c again to exit");
+        }
+    });
+
     let ws_in = {
         read.for_each(|message| async {
             if let Ok(msg) = message {
                 match msg {
                     Message::Text(text) => {
-                        if let Ok(msg) = SharedMessage::from_json(&text) {
-                            match msg {
-                                SharedMessage::Position(position) => {
-                                    println!("Position: {}, {}", position.x, position.y);
-                                    let direction = Direction::random();
-                                    let msg = SharedMessage::new_move(direction).to_json().unwrap();
-                                    if tx.send(Message::Text(msg)).is_err() {
-                                        println!("Error sending message");
-                                    }
-                                }
-                                SharedMessage::Score(score) => {
-                                    println!("Score: {:?}", score);
-                                }
-                                _ => {}
+                        let msg = SharedMessage::from_json(&text).unwrap();
+                        match msg {
+                            SharedMessage::Position(position) => {
+                                println!("Position: {}, {}", position.x, position.y);
+                                let direction = Direction::random();
+                                let msg = SharedMessage::new_move(direction).to_json().unwrap();
+                                let _ = tx.send(Message::Text(msg));
                             }
+                            SharedMessage::Score(score) => {
+                                println!("Score: {}", score);
+                                exit(0);
+                            }
+                            _ => {}
                         }
                     }
                     _ => {}
@@ -45,8 +60,10 @@ async fn main() {
             }
         })
     };
+
     tokio::select! {
         _ = ws_in => {}
         _ = ws_out => {}
+        _ = signal => {}
     }
 }

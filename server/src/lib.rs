@@ -181,7 +181,12 @@ impl Game {
                 Message::Move(direction) => {
                     self.adjust_position(client, direction);
                 }
-                Message::Disconnect => {}
+                Message::Disconnect => {
+                    let score_msg = Message::new_score(client.state.read().score.clone())
+                        .to_json()
+                        .unwrap();
+                    let _ = client.sender.send(score_msg);
+                }
                 _ => {}
             }
         }
@@ -311,12 +316,7 @@ impl Game {
                 let pos_msg = Message::new_position(client.state.read().position.clone())
                     .to_json()
                     .unwrap();
-                let score_msg = Message::new_score(client.state.read().score.clone())
-                    .to_json()
-                    .unwrap();
-                let sender = client.sender.clone();
-                let _ = sender.send(pos_msg);
-                let _ = sender.send(score_msg);
+                let _ = client.sender.send(pos_msg);
             }
         }
     }
