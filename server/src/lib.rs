@@ -1,11 +1,11 @@
-use parking_lot::lock_api::RwLockWriteGuard;
-use parking_lot::{RawRwLock, RwLock};
+use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use rand::Rng;
 use shared::*;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 #[macro_use]
